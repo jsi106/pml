@@ -1,0 +1,95 @@
+---
+title: "PML Project"
+author: "Joseph I"
+date: "October 21, 2014"
+output: html_document
+---
+
+## Executive Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, I will be using data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways, and use machine learning techniques to predict the ways participants had conducted their exercises.
+
+The five different ways are
+  * Class A - exactly according to the specification
+  * Class B - throwing the elbows to the front
+  * Class C - lifting the dumbbell only halfway
+  * Class D - lowering the dumbbell only halfway
+  * Class E - throwing the hips to the front
+
+The predicting model used is random forest, and data are divided into 70/30 for training and testing.  K-Fold of 10 is employed during training, and I have also removed feature sets that contain NA or empty value, and timestamp features.  The result is accurate enough that I did not attempt to impute values on NA or emptye string features. 
+
+## Downlaod training and test files for modeling.
+
+```{r}
+library(caret)
+library(ggplot2)
+library(doSNOW)
+
+if (!file.exists("training.raw.csv")) {
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", method="curl", dest="training.raw.csv")
+}
+if (!file.exists("testing.raw.csv")) {
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", method="curl", dest="testing.raw.csv")
+}
+testing.raw <- read.table("testing.raw.csv", header=TRUE, sep=",")
+training.raw <- read.table("training.raw.csv", header=TRUE, sep=",")
+```
+
+## Exploratory analysis on the training data
+```{r}
+dim(testing.raw)
+dim(training.raw)
+range = 1:5 # features to skip: username and timestamp
+
+# sample columns with lots of NA and emptys
+# use colMeans and colSums to identify them, less than 5% is NA, and less than 10 empty
+# also skip X and username, X (possibly row number) is heavy indicator because results are sorted
+# also skip new_windows and num_windows
+training.data <- subset(training.raw, select=colSums(training.raw == "", na.rm=TRUE) < 10 & colMeans(is.na(training.raw)) < 0.05)[,-range]
+testing.data <- subset(testing.raw, select=colSums(testing.raw == "", na.rm=TRUE) < 10 & colMeans(is.na(testing.raw)) < 0.05)[,-range]
+```
+
+## Create Partition for Training and Validating
+```{r}
+set.seed(825)
+trainIndex = createDataPartition(training.data$classe, p = 0.70,list=FALSE)
+training <- training.data[trainIndex,]
+validating <- training.data[-trainIndex,]
+```
+
+## Training model using Random Forest, and cross validation
+```{r,echo=FALSE}
+registerDoSNOW(makeCluster(4))
+```
+```{r,cache=TRUE}
+system.time(fitModel <- train(classe ~ ., data = training[sample(nrow(training)),], method = "rf", importance=TRUE, trControl = trainControl(method = "cv", number = 10)))
+```
+```{r,echo=FALSE}
+stopCluster
+```
+
+## Examine Model and Variables
+```{r}
+print(fitModel$finalModel)
+plot(fitModel$finalModel)
+plot(varImp(fitModel), top=10)
+```
+From the result, we observe an in-sample error of 0.17%, from varImp plot, the most critical variables are 
+"num_window" and "roll_belt".
+
+## Validation on allocated samples
+```{r}
+randomValidating <- validating[sample(nrow(validating)),]
+p <- predict(fitModel, newdata=randomValidating)
+confusionMatrix(p,randomValidating$classe)
+```
+Predict the result on our validation sample shows an out-sample error of 0.32%.
+
+## Conclusion
+Random forest algorithm is very capable model with an 99.68% accuray, even with no data imputation on the skipped features.
+The down side is training took an extremely long time (1127second = 18min)
+
+## Reference
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+Read more: http://groupware.les.inf.puc-rio.br/har#ixzz3HCw8qVYo
+
